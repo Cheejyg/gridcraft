@@ -2313,6 +2313,9 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
             let doc = app.session.active();
             let sh = doc.and_then(|d| d.wb.active());
             let body_start = r.start.row.saturating_add(u32::from(header));
+            let cols = r.end.col.saturating_sub(r.start.col).saturating_add(1).clamp(1, 1024) as usize;
+            // Total sampled cells are bounded across all columns, not per column.
+            let rows_per_col = (200_000 / cols).max(1);
             (r.start.col..=r.end.col)
                 .take(1024)
                 .map(|c| {
@@ -2324,7 +2327,7 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
                     let label = if text.is_empty() { format!("Column {letters}") } else { text };
                     let (mut numbers, mut texts) = (0usize, 0usize);
                     if let Some(sh) = sh {
-                        for row in (body_start..=r.end.row).take(10_000) {
+                        for row in (body_start..=r.end.row).take(rows_per_col) {
                             let v = sh.value(gridcraft_engine::core::CellRef::new(row, c));
                             if v.is_text() {
                                 texts += 1;
@@ -2341,7 +2344,7 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
     let mut levels: Vec<Json> = d.values.get("levels").and_then(Json::as_array).cloned().unwrap_or_default();
     let mut selected = d.list_index.min(levels.len().saturating_sub(1));
     ui.horizontal(|ui| {
-        if icon_button(ui, Icon::Plus, icons::GREEN, "Add Level", true).clicked() {
+        if icon_button(ui, Icon::Plus, icons::GREEN, "Add Level", levels.len() < 64).clicked() {
             let used: Vec<&str> = levels.iter().filter_map(|l| l["column"].as_str()).collect();
             let next = choices.iter().map(|(l, _, _)| l.clone()).find(|l| !used.contains(&l.as_str())).unwrap_or_else(|| "A".into());
             levels.push(json!({"column": next, "order": "asc"}));
@@ -2351,7 +2354,7 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
             levels.remove(selected);
             selected = selected.saturating_sub(1);
         }
-        if icon_button(ui, Icon::Copy, icons::BLUE, "Copy Level", !levels.is_empty()).clicked()
+        if icon_button(ui, Icon::Copy, icons::BLUE, "Copy Level", !levels.is_empty() && levels.len() < 64).clicked()
             && let Some(lv) = levels.get(selected).cloned()
         {
             levels.insert(selected + 1, lv);

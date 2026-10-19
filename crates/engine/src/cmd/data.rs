@@ -180,7 +180,7 @@ pub fn sort_context(s: &Session, p: &Json) -> Result<(RangeRef, bool)> {
 /// Excel's header guess: the first row is text over a column of numbers, or is bold.
 fn guess_header(wb: &Workbook, sh: &Sheet, r: RangeRef) -> bool {
     if let Some(t) = sh.table_at(r.start) {
-        return t.header_row;
+        return t.header_row && r.start.row == t.range.start.row;
     }
     if r.height() < 2 {
         return false;
@@ -269,6 +269,7 @@ fn sort(s: &mut Session, p: &Json) -> Result<Json> {
         });
     }
     if keys.is_empty() {
+        let (r, header) = sort_context(s, p)?;
         s.ui_requests.push(crate::UiRequest::Dialog("sort".into(), json!({"range": r.a1(), "header": header})));
         return ok();
     }
@@ -1570,6 +1571,14 @@ mod tests {
         assert_eq!(data_range(&s, &json!({})).unwrap().a1(), "A1:A3");
         // An explicit range wins over the selection.
         assert_eq!(sort_context(&s, &json!({"range": "A1:A2"})).unwrap().0.a1(), "A1:A2");
+        // A block starting below the header row has no header.
+        s.execute("selection.set", json!({"range": "A2:A4"})).unwrap();
+        assert!(!sort_context(&s, &json!({})).unwrap().1);
+        // The data.sort dialog request uses the selected block.
+        s.execute("selection.set", json!({"range": "A1:A4"})).unwrap();
+        s.ui_requests.clear();
+        s.execute("data.sort", json!({})).unwrap();
+        assert!(matches!(s.ui_requests.last(), Some(crate::UiRequest::Dialog(n, v)) if n == "sort" && v["range"] == "A1:A4"));
     }
 
     #[test]
