@@ -2313,11 +2313,10 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
             let doc = app.session.active();
             let sh = doc.and_then(|d| d.wb.active());
             let body_start = r.start.row.saturating_add(u32::from(header));
-            let cols = r.end.col.saturating_sub(r.start.col).saturating_add(1).clamp(1, 1024) as usize;
+            let cols = r.end.col.saturating_sub(r.start.col).saturating_add(1).max(1) as usize;
             // Total sampled cells are bounded across all columns, not per column.
             let rows_per_col = (200_000 / cols).max(1);
             (r.start.col..=r.end.col)
-                .take(1024)
                 .map(|c| {
                     let letters = gridcraft_engine::core::col_to_letters(c);
                     let text = match (header, sh) {
