@@ -118,7 +118,7 @@ impl Dialog {
     }
 
     pub fn open(app: &mut SheetApp, name: &str, params: Json) -> Option<Dialog> {
-        let sel = app.session.active().map(|d| d.selection.current().a1()).unwrap_or_default();
+        let sel = app.session.active().map(|d| d.selection.a1()).unwrap_or_default();
         let active = app.session.active().map(|d| d.selection.active.a1()).unwrap_or_default();
         let p = |k: &str| params.get(k).cloned().unwrap_or(Json::Null);
         use Field::*;
@@ -1184,9 +1184,7 @@ pub fn show(app: &mut SheetApp, ctx: &egui::Context) {
         .min_height(if d.name == "sort" { 260.0 } else { 0.0 })
         .open(&mut win_open);
     // A default position, not an anchor: egui anchors can't be dragged, and dialogs move by their title bar.
-    let window = window
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.content_rect().center() + vec2(0.0, -40.0));
+    let window = window.pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center() + vec2(0.0, -40.0));
     let window = match d.name.as_str() {
         "insertPicture" => window.default_height(240.0),
         "advancedFilter" => window.default_height(0.0),
@@ -2343,9 +2341,12 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
     let mut levels: Vec<Json> = d.values.get("levels").and_then(Json::as_array).cloned().unwrap_or_default();
     let mut selected = d.list_index.min(levels.len().saturating_sub(1));
     ui.horizontal(|ui| {
-        if icon_button(ui, Icon::Plus, icons::GREEN, "Add Level", levels.len() < 64).clicked() {
-            let used: Vec<&str> = levels.iter().filter_map(|l| l["column"].as_str()).collect();
-            let next = choices.iter().map(|(l, _, _)| l.clone()).find(|l| !used.contains(&l.as_str())).unwrap_or_else(|| "A".into());
+        // New levels must use an unused column in the selected sort range.
+        let used: Vec<&str> = levels.iter().filter_map(|l| l["column"].as_str()).collect();
+        let next_column = choices.iter().map(|(l, _, _)| l).find(|l| !used.contains(&l.as_str())).cloned();
+        if icon_button(ui, Icon::Plus, icons::GREEN, "Add Level", levels.len() < 64 && next_column.is_some()).clicked()
+            && let Some(next) = next_column
+        {
             levels.push(json!({"column": next, "order": "asc"}));
             selected = levels.len() - 1;
         }
