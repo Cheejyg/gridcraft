@@ -118,7 +118,8 @@ impl Dialog {
     }
 
     pub fn open(app: &mut SheetApp, name: &str, params: Json) -> Option<Dialog> {
-        let sel = app.session.active().map(|d| d.selection.a1()).unwrap_or_default();
+        let sel = app.session.active().map(|d| d.selection.current().a1()).unwrap_or_default();
+        let all_sel = app.session.active().map(|d| d.selection.a1()).unwrap_or_default();
         let active = app.session.active().map(|d| d.selection.active.a1()).unwrap_or_default();
         let p = |k: &str| params.get(k).cloned().unwrap_or(Json::Null);
         use Field::*;
@@ -761,7 +762,7 @@ impl Dialog {
                 Dialog::custom(
                     "sort",
                     "Sort",
-                    json!({"header": header, "range": range.map(|r| r.a1()), "selection": sel, "active": active, "levels": [{"column": first, "order": "asc"}]}),
+                    json!({"header": header, "range": range.map(|r| r.a1()), "selection": all_sel, "active": active, "levels": [{"column": first, "order": "asc"}]}),
                 )
             }
             "nameManager" => Dialog::custom("nameManager", "Name Manager", json!({})),
@@ -2322,18 +2323,12 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
                         _ => String::new(),
                     };
                     let label = if text.is_empty() { format!("Column {letters}") } else { text };
-                    let (mut numbers, mut texts) = (0usize, 0usize);
-                    if let Some(sh) = sh {
-                        for row in (body_start..=r.end.row).take(rows_per_col) {
-                            let v = sh.value(gridcraft_engine::core::CellRef::new(row, c));
-                            if v.is_text() {
-                                texts += 1;
-                            } else if matches!(v, gridcraft_engine::core::Value::Number(_)) {
-                                numbers += 1;
-                            }
-                        }
-                    }
-                    (letters, label, numbers > 0 && texts == 0)
+                    let numeric = sh.is_some_and(|sh| {
+                        sort_values_are_numeric(
+                            (body_start..=r.end.row).take(rows_per_col).map(|row| sh.value(gridcraft_engine::core::CellRef::new(row, c))),
+                        )
+                    });
+                    (letters, label, numeric)
                 })
                 .collect()
         })
@@ -2483,6 +2478,18 @@ fn sort(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, confirm: &mut boo
     if !open {
         *confirm = true;
     }
+}
+
+fn sort_values_are_numeric(values: impl IntoIterator<Item = gridcraft_engine::core::Value>) -> bool {
+    let mut has_number = false;
+    for value in values {
+        match value {
+            gridcraft_engine::core::Value::Empty => {}
+            gridcraft_engine::core::Value::Number(_) => has_number = true,
+            _ => return false,
+        }
+    }
+    has_number
 }
 
 fn name_manager(app: &mut SheetApp, ui: &mut egui::Ui, d: &mut Dialog, open: &mut bool) {
@@ -3274,6 +3281,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sort_order_is_numeric_only_for_numbers_and_empty_cells() {
+        use gridcraft_engine::core::{CellError, Value};
+
+        assert!(sort_values_are_numeric([Value::Number(1.0), Value::Empty, Value::Number(2.0)]));
+        assert!(!sort_values_are_numeric([Value::Empty, Value::Empty]));
+        assert!(!sort_values_are_numeric([Value::Number(1.0), Value::Bool(true)]));
+        assert!(!sort_values_are_numeric([Value::Number(1.0), Value::Error(CellError::Value)]));
+        assert!(!sort_values_are_numeric([Value::Number(1.0), Value::text("")]));
+    }
+
+    #[test]
     fn remove_duplicates_prefills_the_selection_and_submits_the_edited_range() {
         let mut session = gridcraft_engine::Session::default();
         session.new_workbook();
@@ -3296,6 +3314,17 @@ mod tests {
         let mut app = SheetApp::new(session, Default::default());
         let dialog = Dialog::open(&mut app, "removeDuplicates", json!({})).unwrap();
         assert_eq!(dialog.values.get("range"), Some(&json!("B2:C4")));
+    }
+
+    #[test]
+    fn remove_duplicates_uses_only_the_current_area_of_a_multi_area_selection() {
+        let mut session = gridcraft_engine::Session::default();
+        session.new_workbook();
+        session.execute("selection.set", json!({"range": "A1:A3,C2:D4", "active": "D3"})).unwrap();
+        let mut app = SheetApp::new(session, Default::default());
+        let dialog = Dialog::open(&mut app, "removeDuplicates", json!({})).unwrap();
+        assert_eq!(dialog.values.get("range"), Some(&json!("C2:D4")));
+        assert_eq!(build_params(&dialog)["range"], "C2:D4");
     }
 
     #[test]
